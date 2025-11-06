@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnóstico Comercial com a IA do Victor Vieira</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Adicionado html2canvas ANTES do jsPDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        /* Estilo para a barra de rolagem */
+        #chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+        #chat-messages::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        #chat-messages::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+        #chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #a0aec0;
+        }
+
+        /* Animação do indicador "digitando" */
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+        }
+        .typing-indicator span {
+            height: 8px;
+            width: 8px;
+            margin: 0 2px;
+            background-color: #9ca3af;
+            border-radius: 50%;
+            display: inline-block;
+            animation: bounce 1.4s infinite both;
+        }
+        .typing-indicator span:nth-child(1) {
+            animation-delay: -0.32s;
+        }
+        .typing-indicator span:nth-child(2) {
+            animation-delay: -0.16s;
+        }
+        @keyframes bounce {
+            0%, 80%, 100% {
+                transform: scale(0);
+            }
+            40% {
+                transform: scale(1);
+            }
+        }
+
+        /* Barra de Carregamento */
+        .loading-bar-container {
+            width: 100%;
+            background-color: #e0e0e0;
+            border-radius: 5px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        .loading-bar {
+            height: 10px;
+            width: 0%;
+            background-color: #2563EB; /* blue-600 */
+            border-radius: 5px;
+            text-align: center;
+            color: white;
+            transition: width 0.1s linear; /* Suaviza o movimento */
+        }
+        .loading-text {
+            font-size: 0.85rem;
+            color: #4a5568; /* gray-700 */
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans antialiased">
+
+    <div class="flex flex-col h-screen max-w-3xl mx-auto bg-white shadow-2xl rounded-lg overflow-hidden my-0 md:my-8">
+        <!-- Cabeçalho -->
+        <header class="bg-blue-800 text-white p-4 text-center shadow-md z-10">
+            <h1 class="text-xl font-bold">Diagnóstico Comercial com a IA do Victor Vieira</h1>
+            <p class="text-sm text-blue-200">Contém mais de 20 anos de experiência de sucesso em vendas, gestão e negócios</p>
+        </header>
+
+        <!-- Área de Mensagens -->
+        <main id="chat-messages" class="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 flex items-center justify-center">
+            <div id="start-screen" class="text-center">
+                <button onclick="startChatQueue()" class="bg-blue-800 text-white py-3 px-6 rounded-lg font-bold text-lg hover:bg-blue-900 transition shadow-lg">
+                    Iniciar chat com especialista
+                </button>
+            </div>
+            <!-- Mensagens do chat serão injetadas aqui -->
+        </main>
+
+        <!-- Área de Entrada Dinâmica -->
+        <footer id="input-area" class="p-4 bg-gray-50 border-t border-gray-200 shadow-inner" style="display: none;">
+            <!-- Inputs, botões e formulários serão injetados aqui -->
+        </footer>
+    </div>
+
+    <script>
+        // Referências do DOM
+        const chatMessages = document.getElementById('chat-messages');
+        const inputArea = document.getElementById('input-area');
+
+        // Estado da aplicação
+        let currentState = 0;
+        const userData = {
+            vendedores: null,
+            faturamento: null,
+            ticketMedio: null,
+            meta: null,
+            produto: null,
+            nome: null,
+            telefone: null,
+            temDadosHistoricos: false, 
+            dadosHistoricos: null,
+        };
+
+        // Perguntas do Bot
+        const botQuestions = [
+            "Olá! Eu sou a inteligência artificial do Victor Vieira, que contém todo o conhecimento de anos de experiência com vendas. Estou aqui para analisar seus resultados de vendas, trazendo sugestões de melhoria e potencialização. Para começar, preciso fazer algumas perguntas rápidas, tudo bem?", // 0
+            "Legal, obrigado! Para começar, quantos vendedores ativos sua equipe tem hoje?", // 1
+            "Certo. E qual foi o faturamento mensal total da sua equipe no último mês? (R$)", // 2
+            "Show! E me conta outra coisa aqui: qual é o ticket médio aproximado por produto ou serviço que vocês vendem? (R$)", // 3
+            "Ah, entendi. E qual é a meta mensal de faturamento da equipe? (R$)", // 4
+            "Ótimo. Para eu entender seu contexto, o que sua empresa vende?", // 5
+            // 4. Pergunta dos 12 meses ajustada
+            "Entendido. Estamos quase lá. Você quer me mandar mais alguma informação pra eu analisar?", // 6
+            // 4. Pergunta de upload ajustada
+            "Perfeito! Para que eu possa analisar, por favor, cole o texto com as informações aqui ou anexe um arquivo. Aceito imagens, PDFs, CSVs, TXTs ou XLSXs.", // 7
+            "Perfeito. Coletei todas as informações. Só um momento enquanto eu analiso seus dados...", // 8
+            "Pronto, já tenho o diagnóstico completo. Para eu te enviar com segurança, preciso apenas atualizar seus dados aqui.", // 9
+            "Por favor, preencha abaixo para receber sua análise:", // 10
+        ];
+
+
+        // ---- FUNÇÕES DO CHAT ----
+
+        /** Adiciona uma mensagem de bot ao chat */
+        function addBotMessage(message, isHtml = false) {
+            const messageEl = document.createElement('div');
+            messageEl.classList.add('flex', 'items-start', 'space-x-3', 'group');
+
+            const avatar = document.createElement('img');
+            avatar.src = 'https://i.imgur.com/yYgP5QM.png'; // Link direto da imagem
+            avatar.alt = 'Avatar do Victor Vieira';
+            avatar.classList.add('w-10', 'h-10', 'rounded-full', 'object-cover', 'flex-shrink-0', 'border-2', 'border-blue-700');
+            
+            const bubble = document.createElement('div');
+            bubble.classList.add('bg-blue-600', 'text-white', 'p-3', 'rounded-xl', 'rounded-bl-none', 'max-w-xs', 'md:max-w-md', 'shadow-md', 'break-words');
+            
+            if (isHtml) {
+                bubble.innerHTML = message;
+            } else {
+                bubble.textContent = message;
+            }
+            
+            messageEl.appendChild(avatar);
+            messageEl.appendChild(bubble);
+            chatMessages.appendChild(messageEl);
+            scrollChatToBottom();
+        }
+
+        /** Adiciona uma mensagem do usuário ao chat */
+        function addUserMessage(message, isHtml = false) {
+            const messageEl = document.createElement('div');
+            messageEl.classList.add('flex', 'justify-end');
+            
+            const bubble = document.createElement('div');
+            bubble.classList.add('bg-white', 'text-gray-800', 'p-3', 'rounded-xl', 'rounded-br-none', 'max-w-xs', 'md:max-w-md', 'shadow');
+            
+            if (isHtml) {
+                bubble.classList.add('whitespace-pre-wrap', 'text-sm'); 
+                bubble.innerHTML = message;
+            } else {
+                bubble.textContent = message;
+            }
+            messageEl.appendChild(bubble);
+            chatMessages.appendChild(messageEl);
+            scrollChatToBottom();
+        }
+
+        /** Adiciona o indicador de "digitando" */
+        function showTypingIndicator(callback) {
+            const typingEl = document.createElement('div');
+            typingEl.classList.add('flex', 'items-start', 'space-x-3');
+            
+            const avatar = document.createElement('img');
+            avatar.src = 'https://i.imgur.com/yYgP5QM.png'; // Link direto da imagem
+            avatar.alt = 'Avatar do Victor Vieira';
+            avatar.classList.add('w-10', 'h-10', 'rounded-full', 'object-cover', 'flex-shrink-0', 'border-2', 'border-blue-700');
+            
+            typingEl.appendChild(avatar);
+            typingEl.innerHTML += `
+                <div class="bg-gray-200 p-3 rounded-xl rounded-bl-none shadow">
+                    <div class="typing-indicator">
+                        <span></span><span></span><span></span>
+                    </div>
+                </div>
+            `;
+            chatMessages.appendChild(typingEl);
+            scrollChatToBottom();
+
+            const delay = 1800 + Math.random() * 1000; // 1.8s + aleatório
+            setTimeout(() => {
+                chatMessages.removeChild(typingEl);
+                if (callback) callback();
+            }, delay);
+        }
+
+        /** Rola o chat para a última mensagem */
+        function scrollChatToBottom() {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        /** Formata números como moeda BRL */
+        function formatCurrency(value) {
+            return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        }
+        
+        // Função auxiliar para converter "chunks" (ex: "duzentos e cinquenta e três")
+        function parseChunk(textChunk) {
+            const numbers = {
+                'zero': 0, 'um': 1, 'uma': 1, 'dois': 2, 'três': 3, 'quatro': 4, 'cinco': 5,
+                'seis': 6, 'sete': 7, 'oit': 8, 'oito': 8, 'nove': 9, 'dez': 10,
+                'onze': 11, 'doze': 12, 'treze': 13, 'catorze': 14, 'quatorze': 14, 'quinze': 15,
+                'dezesseis': 16, 'dezessete': 17, 'dezoito': 18, 'dezenove': 19,
+                'vinte': 20, 'trinta': 30, 'quarenta': 40, 'cinquenta': 50,
+                'sessenta': 60, 'setenta': 70, 'oitenta': 80, 'noventa': 90,
+                'cem': 100, 'cento': 100, 'duzentos': 200, 'trezentos': 300,
+                'quatrocentos': 400, 'quinhentos': 500, 'seiscentos': 600,
+                'setecentos': 700, 'oitocentos': 800, 'novecentos': 900
+            };
+
+            // Correção para "10" vs "dez"
+            if (textChunk.match(/^\d+$/)) {
+                return parseInt(textChunk);
+            }
+            
+            let chunkTotal = 0;
+            let currentNumber = 0;
+            // Filtra palavras vazias e 'e'
+            let words = textChunk.split(/[\s-]+/).filter(w => w && w !== 'e');
+
+            for (let word of words) {
+                if (numbers[word]) {
+                    if (numbers[word] === 100 && currentNumber > 0) {
+                         // Trata "cento e..." ou "duzentos e..." (ex: 100 + 20 = 120)
+                        currentNumber += numbers[word];
+                    } else if (numbers[word] >= 100) { // duzentos, trezentos...
+                        // Acumula centenas (ex: 200 + 50 + 3 = 253)
+                        currentNumber += numbers[word]; 
+                    } else { // 1-99
+                        currentNumber += numbers[word];
+                    }
+                }
+            }
+            chunkTotal += currentNumber;
+            return chunkTotal;
+        }
+
+        function textToNumber(text) {
+            // Adiciona "bilhão"
+            const multipliers = { 'mil': 1000, 'milhar': 1000, 'milhão': 1000000, 'milhões': 1000000, 'bilhão': 1000000000, 'bilhões': 1000000000 };
+
+            let total = 0;
+            let textNormalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/,/g, "").replace(/\b(de|e)\b/g, "");
+            
+            textNormalized = textNormalized.replace("milhao", "milhão").replace("milhoes", "milhões");
+            textNormalized = textNormalized.replace("bilhao", "bilhão").replace("bilhoes", "bilhões");
+
+            // Lógica de hierarquia
+            const billionParts = textNormalized.split(/bilhões|bilhão/);
+            if (billionParts.length === 2) {
+                let billionChunk = billionParts[0].trim();
+                if (billionChunk === "") billionChunk = "um";
+                total += parseChunk(billionChunk) * 1000000000;
+                textNormalized = billionParts[1]; 
+            }
+
+            const millionParts = textNormalized.split(/milhões|milhão/);
+            if (millionParts.length === 2) {
+                let millionChunk = millionParts[0].trim();
+                if (millionChunk === "") millionChunk = "um";
+                total += parseChunk(millionChunk) * 1000000;
+                textNormalized = millionParts[1]; 
+            }
+
+            const thousandParts = textNormalized.split(/mil|milhar/);
+            if (thousandParts.length === 2) {
+                let thousandChunk = thousandParts[0].trim();
+                if (thousandChunk === "") thousandChunk = "um";
+                total += parseChunk(thousandChunk) * 1000;
+                textNormalized = thousandParts[1]; 
+            }
+
+            // O que sobrou (centenas/dezenas/unidades)
+            // Correção para "vinte e três"
+            total += parseChunk(textNormalized.replace(/\be\b/g, " ").trim());
+            
+            return total;
+        }
+
+
+        function parseAdvancedCurrency(valueStr) {
+            if (!valueStr) return 0;
+            
+            // Remove prefixos de aproximação
+            let cleanValue = String(valueStr).toLowerCase().trim()
+                .replace(/^r\$\s*/, "")
+                .replace(/\s*reais$/, "")
+                .replace(/^mais ou menos\s*/, "")
+                .replace(/^aproximadamente\s*/, "")
+                .replace(/^cerca de\s*/, "")
+                .replace(/^[+\-~]+\s*/, "")
+                .trim();
+
+            // Tenta converter texto por extenso (ex: "duzentos mil" ou "doze")
+            let numberFromText = textToNumber(cleanValue);
+            if (numberFromText > 0) return numberFromText;
+
+            // Se não for texto, tenta o parse numérico/abreviado (k, mil, milhão)
+            let multiplier = 1;
+
+            if (cleanValue.includes('bilhão') || cleanValue.includes('bilhões')) {
+                multiplier = 1000000000;
+                cleanValue = cleanValue.replace(/bilhão|bilhões/g, '');
+            } else if (cleanValue.includes('milhão') || cleanValue.includes('milhões')) {
+                multiplier = 1000000;
+                cleanValue = cleanValue.replace(/milhão|milhões/g, '');
+            } else if (cleanValue.includes('mil') || cleanValue.includes('k')) {
+                multiplier = 1000;
+                cleanValue = cleanValue.replace('mil', '').replace('k', '');
+            }
+
+            cleanValue = cleanValue.replace(/\./g, '').replace(',', '.').trim();
+            
+            let number = parseFloat(cleanValue) || 0;
+            
+            return number * multiplier;
+        }
+
+
+        // ---- FUNÇÕES DE RENDERIZAÇÃO DA ENTRADA ----
+
+        /** Atualiza a área de input com base no estado atual */
+        function renderInputArea() {
+            inputArea.innerHTML = ''; // Limpa a área
+
+            switch (currentState) {
+                case 0: // Boas-vindas
+                    addBotMessage(botQuestions[0]);
+                    inputArea.innerHTML = `
+                        <div class="flex space-x-2">
+                            <button onclick="handleUserInput('yes')" class="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-blue-700 transition shadow">Sim, tudo bem</button>
+                            <button onclick="handleUserInput('no')" class="flex-1 bg-gray-300 text-gray-800 py-2 px-4 rounded-lg font-medium hover:bg-gray-400 transition shadow">Agora não</button>
+                        </div>
+                    `;
+                    break;
+                
+                case 1: // Pergunta 1: Vendedores
+                    addBotMessage(botQuestions[1]);
+                    inputArea.innerHTML = `
+                        <form onsubmit="event.preventDefault(); handleUserInput();" class="flex space-x-2">
+                            <input id="current-input" type="text" inputmode="text" placeholder="Ex: 10 ou dez" class="flex-1 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" required>
+                            <button type="submit" class="bg-blue-600 text-white py-2 px-5 rounded-lg font-medium hover:bg-blue-700 transition shadow">Enviar</button>
+                        </form>
+                    `;
+                    document.getElementById('current-input').focus();
+                    break;
+
+                case 2: // Pergunta 2: Faturamento
+                case 3: // Pergunta 3: Ticket Médio
+                case 4: // Pergunta 4: Meta
+                    // 2. Conectores fluídos (ex: "Certo. E qual foi...")
+                    let fullQuestion = botQuestions[currentState];
+                    if (currentState === 2) fullQuestion = "Certo. E me diz uma coisa: qual foi o faturamento mensal total da sua equipe no último mês? (R$)";
+                    if (currentState === 3) fullQuestion = "Entendi. E me conta outra coisa aqui: qual é o ticket médio aproximado por produto ou serviço que vocês vendem? (R$)"
+                    if (currentState === 4) fullQuestion = "Legal. E qual é a meta mensal de faturamento da equipe? (R$)";
+                    
+                    addBotMessage(fullQuestion);
+                    inputArea.innerHTML = `
+                        <form onsubmit="event.preventDefault(); handleUserInput();" class="flex space-x-2">
+                            <span class="flex items-center justify-center p-2 bg-gray-200 text-gray-600 border border-gray-300 rounded-l-lg">R$</span>
+                            <input id="current-input" type="text" inputmode="text" placeholder="Ex: 50 mil, 50.000, duzentos mil" class="flex-1 p-2 border border-gray-300 rounded-r-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" required>
+                            <button type="submit" class="bg-blue-600 text-white py-2 px-5 rounded-lg font-medium hover:bg-blue-700 transition shadow">Enviar</button>
+                        </form>
+                    `;
+                    document.getElementById('current-input').focus();
+                    break;
+                
+                case 5: // Pergunta 5: Produto
+                    addBotMessage("Ótimo. Para eu entender seu contexto, o que sua empresa vende?"); // Conector fluído
+                    inputArea.innerHTML = `
+                        <form onsubmit="event.preventDefault(); handleUserInput();" class="flex space-x-2">
+                            <input id="current-input" type="text" placeholder="Ex: Software B2B, Roupas, etc." class="flex-1 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" required>
+                            <button type="submit" class="bg-blue-600 text-white py-2 px-5 rounded-lg font-medium hover:bg-blue-700 transition shadow">Enviar</button>
+                        </form>
+                    `;
+                    document.getElementById('current-input').focus();
+                    break;
+                
+                case 6: // Pergunta 6: Dados históricos (Texto ajustado)
+                    addBotMessage(botQuestions[6]);
+                    inputArea.innerHTML = `
+                        <div class="flex space-x-2">
+                            <button onclick="handleUserInput('sim-dados-historicos')" class="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-blue-700 transition shadow">Sim</button>
+                            <button onclick="handleUserInput('nao-dados-historicos')" class="flex-1 bg-gray-300 text-gray-800 py-2 px-4 rounded-lg font-medium hover:bg-gray-400 transition shadow">Não</button>
+                        </div>
+                    `;
+                    break;
+                
+                case 7: // Solicitar dados históricos (Texto ajustado)
+                    addBotMessage(botQuestions[7]);
+                    inputArea.innerHTML = `
+                        <form onsubmit="event.preventDefault(); handleUserInput();" class="space-y-3">
+                            <textarea id="dados-historicos-text" placeholder="Cole seus dados de vendas aqui..." class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" rows="4"></textarea>
+                            <label for="dados-historicos-file" class="w-full bg-gray-200 text-gray-700 py-2 px-4 rounded-lg cursor-pointer hover:bg-gray-300 transition block text-center">
+                                Ou clique para anexar um arquivo (PDF, CSV, TXT, XLSX, Imagem)
+                            </label>
+                            <input id="dados-historicos-file" type="file" accept=".pdf,.csv,.txt,.xlsx,.jpg,.jpeg,.png" class="hidden" onchange="displayFileName(this)">
+                            <div id="file-name-display" class="text-sm text-gray-600 mt-1"></div>
+                            <button type="submit" class="w-full bg-blue-600 text-white py-2 px-5 rounded-lg font-medium hover:bg-blue-700 transition shadow">Enviar Dados para Análise</button>
+                        </form>
+                    `;
+                    document.getElementById('dados-historicos-text').focus();
+                    break;
+                
+                case 8: // Barra de carregamento
+                    // A barra de carregamento será chamada pelo handleUserInput
+                    inputArea.innerHTML = ''; // Limpa a área
+                    break;
+
+                case 9: // Formulário de Lead
+                    addBotMessage(botQuestions[9]); // "Pronto, já tenho o diagnóstico completo..."
+                    addBotMessage(botQuestions[10]); // "Por favor, preencha abaixo..."
+                    inputArea.innerHTML = `
+                        <form onsubmit="event.preventDefault(); handleUserInput();" class="space-y-3">
+                            <input id="nome-input" type="text" placeholder="Seu nome completo" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" required>
+                            <input id="telefone-input" type="tel" placeholder="Seu telefone (com DDD)" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" required>
+                            <div class="flex space-x-2">
+                                <button type="submit" class="flex-1 bg-green-600 text-white py-2 px-5 rounded-lg font-medium hover:bg-green-700 transition shadow">Receber Diagnóstico</button>
+                                <button type="button" onclick="handleUserInput('skip-lead')" class="bg-gray-300 text-gray-800 py-2 px-4 rounded-lg font-medium hover:bg-gray-400 transition shadow">Agora não</button>
+                            </div>
+                        </form>
+                    `;
+                    break;
+
+                case 10: // Exibir Resultados
+                    inputArea.innerHTML = ''; // Limpa input
+                    displayDiagnosticResults();
+                    break;
+
+                default: // Fim do chat
+                    inputArea.innerHTML = '';
+            }
+        }
+
+        function displayFileName(input) {
+            const fileNameDisplay = document.getElementById('file-name-display');
+            if (input.files.length > 0) {
+                fileNameDisplay.textContent = `Arquivo selecionado: ${input.files[0].name}`;
+                userData.dadosHistoricos = input.files[0];
+                document.getElementById('dados-historicos-text').value = ''; 
+            } else {
+                fileNameDisplay.textContent = '';
+                userData.dadosHistoricos = null;
+            }
+        }
+
+        const loadingPhrases = [
+            "Analisando segmento de mercado...",
+            "Cruzando dados do setor...",
+            "Calculando projeções de crescimento...",
+            "Verificando cenário atual de vendas...",
+            "Refinando gaps que precisam de ajustes...",
+            "Gerando insights personalizados...",
+            "Montando o plano de ação detalhado...",
+            "Finalizando o diagnóstico..."
+        ];
+
+        function showLoadingAndTransitionToLead() {
+            const loadingContainer = document.createElement('div');
+            loadingContainer.classList.add('w-full', 'max-w-md', 'mx-auto', 'my-4', 'p-4', 'bg-white', 'rounded-lg', 'shadow');
+            loadingContainer.innerHTML = `
+                <p class="text-center font-semibold text-gray-800 mb-3">Preparando seu diagnóstico...</p>
+                <div class="loading-bar-container">
+                    <div id="loading-bar" class="loading-bar"></div>
+                </div>
+                <p id="loading-phrase" class="loading-text text-center mt-2"></p>
+            `;
+            chatMessages.appendChild(loadingContainer);
+            scrollChatToBottom();
+
+            const progressBar = document.getElementById('loading-bar');
+            const loadingPhraseEl = document.getElementById('loading-phrase');
+            let progress = 0;
+            let phraseIndex = 0;
+            const intervalTime = 8000 / loadingPhrases.length;
+
+            const loadingInterval = setInterval(() => {
+                progress += (100 / loadingPhrases.length);
+                progressBar.style.width = `${progress}%`;
+                
+                if (phraseIndex < loadingPhrases.length) {
+                    loadingPhraseEl.textContent = loadingPhrases[phraseIndex];
+                    phraseIndex++;
+                }
+
+                if (progress >= 100) {
+                    clearInterval(loadingInterval);
+                    setTimeout(() => {
+                        loadingContainer.remove(); 
+                        currentState = 9; // Vai para o formulário de lead
+                        renderInputArea();
+                    }, 500); 
+                }
+            }, intervalTime);
+        }
+
+
+        // ---- FUNÇÕES DE RESULTADO E PDF ----
+
+        /** Exibe o bloco de diagnóstico (Mais Profissional) */
+        function displayDiagnosticResults() {
+            const { faturamento, meta, vendedores, ticketMedio, produto, nome, temDadosHistoricos } = userData;
+
+            const atingimentoPercent = meta > 0 ? (faturamento / meta) * 100 : 0;
+            const faltaFaturamento = Math.max(0, meta - faturamento);
+            const metaIndividual = vendedores > 0 ? meta / vendedores : 0;
+            const faturamentoPorVendedor = vendedores > 0 ? faturamento / vendedores : 0;
+            const faltaVendas = ticketMedio > 0 ? faltaFaturamento / ticketMedio : 0;
+            const eficienciaVendedorPercent = metaIndividual > 0 ? (faturamentoPorVendedor / metaIndividual) * 100 : 0;
+
+            const ticketMedioSetor = ticketMedio * 1.25; 
+            const potencialGanhoTicket = faturamento * 0.25;
+            
+            // 3. Bloco de Análise de Tendência REMOVIDO
+
+            const resultsHtml = `
+                <div id="diagnostico-block" class="bg-white p-4 md:p-6 rounded-lg shadow-xl border border-gray-200 space-y-6 text-gray-800">
+                    <button onclick="downloadPDF()" class="w-full bg-blue-800 text-white py-2 px-4 rounded-lg font-medium hover:bg-blue-900 transition shadow-md flex items-center justify-center space-x-2">
+                        <span style="font-size: 1.25rem;">&#128196;</span>
+                        <span>Baixar Diagnóstico em PDF</span>
+                    </button>
+                    
+                    <h2 class="text-2xl font-bold text-blue-900 border-b pb-2">Diagnóstico Comercial - ${nome || 'Visitante'}</h2>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-gray-800 mb-3">Desempenho da Meta</h3>
+                        <div class="max-w-xs mx-auto p-4 bg-gray-50 rounded-lg">
+                            <canvas id="metaChart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        <h3 class="text-xl font-semibold text-gray-800 border-b pb-2">Resumo Executivo</h3>
+                        <p class="text-gray-700">
+                            A análise dos seus dados revela que a equipe atingiu <strong class="text-blue-700">${atingimentoPercent.toFixed(1)}%</strong> da meta de <strong class="text-blue-700">${formatCurrency(meta)}</strong>.
+                            O diagnóstico aponta que, embora exista uma lacuna para a meta, há um potencial significativo de ganho imediato na otimização do Ticket Médio e na melhoria da produtividade individual da equipe. Os próximos passos detalham como explorar essas alavancas.
+                        </p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+                            <h4 class="font-bold text-blue-800 text-lg mb-2">Diagnóstico de Produtividade (Equipe)</h4>
+                            <p class="text-sm text-blue-700">
+                                Este é o primeiro indicador de performance. O faturamento por vendedor foi de <strong class="font-semibold">${formatCurrency(faturamentoPorVendedor)}</strong>, enquanto a meta individual necessária para o sucesso é de <strong class="font-semibold">${formatCurrency(metaIndividual)}</strong>.
+                                Atualmente, sua equipe opera com <strong class="font-semibold">${eficienciaVendedorPercent.toFixed(1)}%</strong> da eficiência necessária por vendedor para bater a meta.
+                            </p>
+                        </div>
+                        <div class="bg-red-50 border border-red-200 p-4 rounded-lg">
+                            <h4 class="font-bold text-red-800 text-lg mb-2">Mapeamento de Lacuna (Gap de Meta)</h4>
+                            <p class="text-sm text-red-700">
+                                Identificamos uma lacuna de <strong class="font-semibold">${formatCurrency(faltaFaturamento)}</strong> para atingir a meta.
+                                Esta lacuna não é um problema, mas um *plano de ação*. Com base no seu ticket médio atual, ela se traduz em <strong class="font-semibold">${Math.ceil(faltaVendas)}</strong> novas vendas necessárias.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="bg-green-50 border border-green-200 p-4 rounded-lg">
+                        <h4 class="font-bold text-green-800 text-lg mb-2">Potencial Oculto (Otimização de Ticket Médio)</h4>
+                        <p class="text-sm text-green-700">
+                            Esta é a maior alavanca de curto prazo. O benchmark de empresas do seu setor (<strong>${produto}</strong>) indica um ticket médio 25% maior (aprox. <strong class="font-semibold">${formatCurrency(ticketMedioSetor)}</strong>).
+                            Isso representa um potencial de faturamento *imediato* de <strong class="font-semibold">${formatCurrency(potencialGanhoTicket)}</strong> que está "deixado na mesa", podendo ser capturado com treinamento em *upsell* e *cross-sell*.
+                        </p>
+                    </div>
+                    
+                    <!-- 3. Bloco de Análise de Tendência REMOVIDO -->
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-gray-800 mb-3 border-b pb-2">Plano de Ação Estruturado (7 Dias)</h3>
+                        <ul class="list-disc list-inside space-y-2 text-gray-700 text-sm">
+                            <li><strong>Dia 1 (Alinhamento Estratégico):</strong> Reunião de realinhamento com a equipe para apresentar a meta individual (${formatCurrency(metaIndividual)}) e o diagnóstico de lacunas.</li>
+                            <li><strong>Dia 2 (Capacitação Tática):</strong> Treinamento focado em técnicas de *upsell* e *cross-sell* para elevar o ticket médio.</li>
+                            <li><strong>Dia 3 (Prospecção Qualificada):</strong> Ação de prospecção focada em clientes com perfil de compra de maior valor (aumento de ticket).</li>
+                            <li><strong>Dia 4 (Coaching 1:1):</strong> Sessões individuais com vendedores para análise de pipeline, identificação de gargalos e plano de ação pessoal.</li>
+                            <li><strong>Dia 5 (Aceleração de Pipeline):</strong> Revisão de propostas em aberto e criação de condições estratégicas para fechamento (ex: bônus por combo).</li>
+                            <li><strong>Dia 6 (Reativação de Carteira):</strong> Ação focada em reativar clientes antigos (últimos 6 meses) com a nova oferta de ticket médio.</li>
+                            <li><strong>Dia 7 (Revisão e Ajuste):</strong> Fechamento da semana, análise de resultados do plano e ajuste de rota para a próxima semana.</li>
+                        </ul>
+                    </div>
+
+                    <!-- CTA Final -->
+                    <div class="text-center border-t pt-6 mt-6">
+                        <p class="text-gray-800 font-semibold text-lg">Gostou do plano?</p>
+                        <p class="text-gray-700">A gente pode te ajudar a implementar na prática.</p>
+                        <a href="https://wa.me/5514998236041?text=Ol%C3%A1%2C%20fiz%20o%20diagn%C3%B3stico%20comercial%20com%20a%20IA%20do%20Victor%2C%20e%20quero%20ajuda%20pra%20implantar" target="_blank" rel="noopener noreferrer" class="mt-2 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg inline-flex items-center space-x-2 transition shadow-md">
+                            <span style="font-size: 1.25rem;">&#128172;</span>
+                            <span>Clique aqui e agende uma conversa com um dos nossos consultores</span>
+                        </a>
+                        <!-- 2. Número do WhatsApp para copiar -->
+                        <p class="text-xs text-gray-500 mt-2">
+                            Ou copie o número: (14) 99823-6041
+                        </p>
+                    </div>
+                </div>
+            `;
+            
+            const resultsWrapper = document.createElement('div');
+            resultsWrapper.innerHTML = resultsHtml;
+            chatMessages.appendChild(resultsWrapper);
+            scrollChatToBottom();
+
+            renderChart(faturamento, Math.max(0, faltaFaturamento));
+        }
+
+        /** Renderiza o gráfico de Donut */
+        function renderChart(atingido, restante) {
+            const ctx = document.getElementById('metaChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Faturamento Atingido', 'Restante para Meta'],
+                    datasets: [{
+                        data: [atingido, restante],
+                        backgroundColor: [
+                            '#2563EB', // blue-600
+                            '#E5E7EB'  // gray-200
+                        ],
+                        borderColor: [
+                            '#FFFFFF',
+                            '#FFFFFF'
+                        ],
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '70%',
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed !== null) {
+                                        label += formatCurrency(context.parsed);
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        /** 1. Gera e baixa o PDF (Correção para fundo preto do gráfico) */
+        async function downloadPDF() {
+            const btn = document.querySelector("#diagnostico-block button");
+            const originalText = btn.innerHTML;
+            const chartCanvas = document.getElementById('metaChart');
+            let chartImgData = null;
+
+            // 1. Corrigir fundo preto: Converter gráfico para imagem ANTES
+            //    com fundo branco explícito.
+            if (chartCanvas) {
+                // Cria um canvas temporário com fundo branco
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = chartCanvas.width;
+                tempCanvas.height = chartCanvas.height;
+                
+                // Desenha o fundo branco
+                tempCtx.fillStyle = '#FFFFFF';
+                tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+                
+                // Desenha o gráfico por cima
+                tempCtx.drawImage(chartCanvas, 0, 0);
+                
+                // Pega a imagem com o fundo branco
+                chartImgData = tempCanvas.toDataURL('image/png', 1.0);
+            }
+
+            try {
+                btn.innerHTML = "Gerando PDF...";
+                btn.disabled = true;
+
+                const { jsPDF } = window.jspdf;
+                const element = document.getElementById("diagnostico-block");
+                
+                btn.style.display = 'none'; // Oculta o botão da captura
+
+                // Se o gráfico foi pego, esconde o canvas e mostra a imagem
+                let imgForChart = null;
+                if (chartImgData && chartCanvas) {
+                    imgForChart = document.createElement('img');
+                    imgForChart.src = chartImgData;
+                    // Aplica classes para centralizar e limitar o tamanho, similar ao canvas
+                    imgForChart.className = 'mx-auto';
+                    imgForChart.style.width = '100%';
+                    imgForChart.style.maxWidth = '300px'; // max-w-xs
+                    
+                    chartCanvas.parentNode.replaceChild(imgForChart, chartCanvas);
+                }
+
+                const canvas = await html2canvas(element, {
+                    scale: 2, // Melhor qualidade
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: '#ffffff' // Força fundo branco geral
+                });
+
+                // Restaura o botão e o gráfico
+                btn.style.display = 'flex';
+                if (imgForChart && chartCanvas) {
+                    imgForChart.parentNode.replaceChild(chartCanvas, imgForChart);
+                }
+
+                const imgData = canvas.toDataURL('image/png');
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+                let heightLeft = pdfHeight;
+                let position = 0;
+                const pageHeight = pdf.internal.pageSize.getHeight();
+
+                pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+                heightLeft -= pageHeight;
+
+                while (heightLeft >= 0) {
+                    position = heightLeft - pdfHeight;
+                    pdf.addPage();
+                    pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+                    heightLeft -= pageHeight;
+                }
+                
+                pdf.save(`diagnostico-iev-${userData.nome || 'visitante'}.pdf`);
+
+            } catch (error) {
+                console.error("Erro ao gerar PDF:", error);
+                addBotMessage("Desculpe, tive um problema ao gerar o PDF. Tente novamente.");
+            } finally {
+                // Garante que o botão e o gráfico sejam restaurados
+                if (btn && btn.disabled) {
+                    btn.style.display = 'flex';
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                }
+                if (chartCanvas && !document.getElementById('metaChart')) {
+                    // Se a substituição falhou no try, restaura aqui
+                    const img = element.querySelector('img[src^="data:image/png"]');
+                    if(img) img.parentNode.replaceChild(chartCanvas, img);
+                }
+            }
+        }
+
+
+        /** Inicia o fluxo de chat após a tela inicial */
+        function startChatQueue() {
+            const startScreen = document.getElementById('start-screen');
+            if (!startScreen) return;
+
+            startScreen.innerHTML = `
+                <div class="p-8 text-center">
+                    <p class="text-lg font-medium text-gray-700">Conectando ao especialista...</p>
+                    <p class="text-gray-500">Você é o 2º da fila. Tempo de espera estimado: <span id="countdown">5</span> segundos.</p>
+                </div>
+            `;
+            
+            let seconds = 5;
+            const countdownEl = document.getElementById('countdown');
+            const countdownInterval = setInterval(() => {
+                seconds--;
+                if (countdownEl) {
+                    countdownEl.textContent = Math.max(0, seconds);
+                }
+                if (seconds <= 0) {
+                    clearInterval(countdownInterval);
+                }
+            }, 1000);
+
+            const timerTimeout = setTimeout(() => {
+                clearInterval(countdownInterval);
+                startScreen.remove();
+                chatMessages.classList.remove('flex', 'items-center', 'justify-center');
+                inputArea.style.display = 'block';
+                
+                showTypingIndicator(() => {
+                    currentState = 0;
+                    renderInputArea();
+                });
+
+            }, 5000); 
+        }
+
+        // ---- CONTROLADOR PRINCIPAL ----
+
+        /** Lida com toda a entrada do usuário (botões e formulários) */
+        async function handleUserInput(data) {
+
+            let currentMessageValue = ''; 
+            
+            if (currentState === 0) { 
+                if (data === 'yes') {
+                    currentMessageValue = "Sim, tudo bem";
+                    addUserMessage(currentMessageValue);
+                    currentState = 1;
+                    showTypingIndicator(renderInputArea);
+                } else {
+                    currentMessageValue = "Agora não";
+                    addUserMessage(currentMessageValue);
+                    addBotMessage("Sem problemas. Quando quiser, é só me chamar que voltamos a conversar. Para realizar o diagnóstico, preciso tirar estas dúvidas. Até logo!");
+                    currentState = -1; 
+                    renderInputArea();
+                }
+                return;
+            }
+
+            if (currentState === 6) { 
+                if (data === 'sim-dados-historicos') {
+                    currentMessageValue = "Sim, tenho";
+                    addUserMessage(currentMessageValue);
+                    userData.temDadosHistoricos = true; 
+                    currentState = 7; 
+                    showTypingIndicator(renderInputArea);
+                } else { 
+                    currentMessageValue = "Não tenho";
+                    addUserMessage(currentMessageValue);
+                    userData.temDadosHistoricos = false; 
+                    
+                    // Ajuste para "Não tenho"
+                    addBotMessage("Não tem problema. Vou preparar seu diagnóstico com os dados que já me passou.");
+                    currentState = 8; // Pula para a barra de carregamento
+                    showTypingIndicator(showLoadingAndTransitionToLead);
+                }
+                return;
+            }
+
+            if (currentState === 7) { 
+                const textData = document.getElementById('dados-historicos-text').value;
+                const fileInput = document.getElementById('dados-historicos-file');
+                const selectedFile = fileInput.files[0];
+
+                if (textData) {
+                    currentMessageValue = textData;
+                    userData.dadosHistoricos = textData;
+                    addUserMessage(currentMessageValue, true); // Envia como HTML
+                } else if (selectedFile) {
+                    currentMessageValue = `<span class="font-bold">Arquivo Anexado:</span> ${selectedFile.name}`;
+                    userData.dadosHistoricos = selectedFile;
+                    addUserMessage(currentMessageValue, true);
+                } else {
+                    addBotMessage("Por favor, cole seus dados ou anexe um arquivo para continuar.");
+                    return;
+                }
+
+                currentState = 8; // Vai para a barra de carregamento
+                showTypingIndicator(showLoadingAndTransitionToLead); // Inicia a barra
+                return;
+            }
+
+
+            if (data === 'skip-lead') { 
+                currentMessageValue = "Agora não";
+                addUserMessage(currentMessageValue);
+                addBotMessage("Eu compreendo, é que por questões de segurança e para garantir que a análise chegue corretamente, realmente preciso atualizar seus dados aqui pra te disponibilizar. É só preencher, veja:");
+                return;
+            }
+
+            // Coleta de dados das perguntas (Estados 1 a 5)
+            let inputEl, value;
+            let parsedValue = 0; 
+
+            if (currentState > 0 && currentState < 6) {
+                inputEl = document.getElementById('current-input');
+                value = inputEl.value; 
+                currentMessageValue = value; 
+
+                // Lógica de parsing
+                if (currentState === 1) { // Vendedores (aceita "10" e "dez")
+                     // Correção "10": Tenta primeiro o número, depois o texto.
+                    parsedValue = parseInt(value);
+                    if (isNaN(parsedValue) || parsedValue <= 0) {
+                        parsedValue = parseAdvancedCurrency(value); // Tenta "dez"
+                    }
+                } else if (currentState === 2 || currentState === 3 || currentState === 4) { // Valores monetários
+                    parsedValue = parseAdvancedCurrency(value); 
+                }
+
+                if (!value || (typeof parsedValue === 'number' && parsedValue <= 0 && currentState !== 5)) {
+                    inputEl.classList.add('border-red-500', 'ring-red-500');
+                    setTimeout(() => inputEl.classList.remove('border-red-500', 'ring-red-500'), 2000);
+                    return;
+                }
+            } else if (currentState === 9) { // Coleta de dados do formulário (Estado 9)
+                const nomeEl = document.getElementById('nome-input');
+                const telEl = document.getElementById('telefone-input');
+
+                if (!nomeEl.value || !telEl.value) {
+                    addBotMessage("Por favor, preencha os dois campos para continuar.");
+                    return;
+                }
+                userData.nome = nomeEl.value;
+                userData.telefone = telEl.value;
+                currentMessageValue = `Nome: ${userData.nome}, Telefone: ${userData.telefone}`;
+                addUserMessage(currentMessageValue);
+                addBotMessage(`Obrigado, ${userData.nome}! Estou preparando seu diagnóstico...`);
+                currentState = 10; // Avança para os resultados
+                showTypingIndicator(renderInputArea);
+                return;
+            }
+
+            // Processamento da máquina de estados (Perguntas 1-5)
+            switch (currentState) {
+                case 1: 
+                    userData.vendedores = parseInt(parsedValue);
+                    addUserMessage(currentMessageValue); // Mostra "10" ou "dez"
+                    break;
+                case 2: 
+                    userData.faturamento = parsedValue;
+                    addUserMessage(formatCurrency(userData.faturamento));
+                    break;
+                case 3: 
+                    userData.ticketMedio = parsedValue;
+                    addUserMessage(formatCurrency(userData.ticketMedio));
+                    break;
+                case 4: 
+                    userData.meta = parsedValue;
+                    addUserMessage(formatCurrency(userData.meta));
+                    break;
+                case 5: 
+                    userData.produto = value;
+                    addUserMessage(currentMessageValue);
+                    break;
+            }
+            
+            currentState++; // Avança para a próxima pergunta
+
+            showTypingIndicator(() => {
+                renderInputArea(); // Apenas renderiza a próxima pergunta/estado
+            });
+        }
+    </script>
+</body>
+</html>
